@@ -1,0 +1,49 @@
+name:                wg-mgmt
+version:             0.1.0.0
+github:              "lukefrasera/wg-mgmt"
+license:             BSD3
+author:              "Luke Fraser"
+maintainer:          "lukefrasera@gmail.com"
+copyright:           "GPLv3"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/lukefrasera/wg-mgmt#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- optparse-applicative
+
+library:
+  source-dirs: src
+
+executables:
+  wg-mgmt-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - wg-mgmt
+
+tests:
+  wg-mgmt-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - wg-mgmt
