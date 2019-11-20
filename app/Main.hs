@@ -14,7 +14,7 @@ data Command =
   | Gen Name
   | Add CmdUser
   | Del Name
-  | Get
+  | Get Name
   | Update CmdUser
   | Make Name
   deriving Show
@@ -130,7 +130,7 @@ delParser :: Parser Command
 delParser = Del <$> nameParser
 
 getParser :: Parser Command
-getParser = pure Get
+getParser = Get <$> nameParser
 
 updateParser :: Parser Command
 updateParser = Update <$> userParser
@@ -193,11 +193,11 @@ main = do
   --   [ User "grapple" "privatekey" "publickey" (Just "presharedkey") "10.2.0.1" (Just "4444") (Just "lukefrasera.dynu.net") Nothing Nothing Nothing Nothing (Just 25) Nothing
   --   ]
   config <- readConfigFile expandedDataPath
-  print config
-  mbConfig <- run config command
-  case mbConfig of
-    Nothing -> writeConfigFile expandedDataPath config
-    Just modConfig -> writeConfigFile expandedDataPath modConfig
+  -- print config
+  eiConfig <- run config command
+  case eiConfig of
+    Left str -> putStrLn $ "Error: " ++ str
+    Right modConfig -> writeConfigFile expandedDataPath modConfig
   return ()
 
 generateUser :: CmdUser -> WGConfig -> IO User
@@ -257,13 +257,20 @@ generateUser cUser config = do
   return (User name privateKey publicKey presharedKey address port endPoint preUp preDown postUp postDown keepAlive peers)
 
 
-run :: WGConfig -> Command -> IO (Maybe WGConfig)
+run :: WGConfig -> Command -> IO (Either String WGConfig)
 run config Init          = initConfig config
 -- run config (Gen name)    = putStrLn $ "Generate Client/Server Configuration file for " ++ name
-run config (Add cuser)    = do
+run config (Add cuser)   = do
   user <- generateUser cuser config
   return (addUserToConfig config user)
--- run config (Del name)    = putStrLn "Delete Client/Server"
--- run config Get           = putStrLn "Get Client/Server Info"
--- run config (Update user) = putStrLn "Update Client/Server Configuration Live"
+run config (Del name)    = return $ delUserFromConfig config name
+run config (Get name)    =
+  case getUserInfo config name of
+    Left str -> return $ Left str
+    Right str -> do
+      putStrLn str
+      return $ Right config
+run config (Update cuser) = do
+  user <- generateUser cuser config
+  return $ updateUserInConfig config user
 -- run config (Make name)   = putStrLn "Make a self-installing script"
