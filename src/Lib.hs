@@ -24,7 +24,7 @@ module Lib
   , ipFromInt
   , delUserFromConfig
   , getUserInfo
-  , updateUserInConfig
+  , userInConfig
   ) where
 
 
@@ -79,15 +79,19 @@ instance FromJSON User
 writeConfigFile :: FilePath -> WGConfig -> IO ()
 writeConfigFile configPath config = BS.writeFile configPath (Yaml.encode config)
 
-readConfigFile :: FilePath -> IO WGConfig
+readConfigFile :: FilePath -> IO (Either String WGConfig)
 readConfigFile path = do
-  mbConfig <- catchJust
+  mbBs <- catchJust
     (\e -> if isDoesNotExistError e then Just () else Nothing)
-    (BS.readFile path >>= return . Yaml.decode)
-    (\_ -> return $ Just (WGConfig []))
-  case mbConfig of
-    Nothing -> error "YAML file is corrupt"
-    Just config -> return config
+    (Just <$> BS.readFile path)
+    (\_ -> return $ Just BS.empty)
+  case mbBs of
+    Nothing -> return $ Left "YAML file is corrupt"
+    Just bs ->
+      if bs == "" then return $ Right $ WGConfig [] else
+      case Yaml.decodeEither' bs of
+        Left e -> return $ Left $ Yaml.prettyPrintParseException e
+        Right config -> return $ Right config
 
 initConfig :: WGConfig -> IO (Either String WGConfig)
 initConfig config = do
@@ -109,6 +113,7 @@ addUserToConfig (WGConfig users) user
   | otherwise = Right (WGConfig $ user:users)
 
 userInConfig :: WGConfig -> Name -> Bool
+userInConfig (WGConfig []) username = False
 userInConfig (WGConfig users) username =
   L.any (\u -> (name u) == username) users
 
@@ -118,6 +123,8 @@ addressInConfig (WGConfig users) addr =
 
 
 getAvailableAddress :: WGConfig -> String
+getAvailableAddress (WGConfig []) =
+  error "User must supply first IP"
 getAvailableAddress (WGConfig users) =
   case addIP (read (L.maximum addresses)) 1 of
     Nothing -> ""
@@ -169,24 +176,3 @@ lookupUser (WGConfig (user:users)) username =
   if name user == username
     then user
     else lookupUser (WGConfig users) username
-
-updateUserInConfig :: WGConfig -> User -> Either String WGConfig
-updateUserInConfig config user =
-  if userInConfig config $ name user
-    then Right $ updateUser config user
-    else Left "User not in config"
-
-updateUser :: WGConfig -> User -> WGConfig
-updateUser (WGConfig (user:users)) newuser =
-  if name user == name newuser
-    then WGConfig $ (mergeUsers user newuser):updatedUsers
-    else WGConfig $ user:updatedUsers
-    where
-      updatedUsers =
-        case updateUser (WGConfig users) newuser of
-          (WGConfig users) -> users
-updateuser (WGConfig []) newuser = []
-    
-mergeUsers :: User -> User -> User
-mergeUsers ouser nuser =
-  undefined

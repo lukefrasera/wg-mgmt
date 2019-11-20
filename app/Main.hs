@@ -194,11 +194,14 @@ main = do
   --   ]
   config <- readConfigFile expandedDataPath
   -- print config
-  eiConfig <- run config command
-  case eiConfig of
-    Left str -> putStrLn $ "Error: " ++ str
-    Right modConfig -> writeConfigFile expandedDataPath modConfig
-  return ()
+  case config of
+    Left str -> putStrLn str
+    Right config -> do
+      eiConfig <- run config command
+      case eiConfig of
+        Left str -> putStrLn $ "Error: " ++ str
+        Right modConfig -> writeConfigFile expandedDataPath modConfig
+      return ()
 
 generateUser :: CmdUser -> WGConfig -> IO User
 generateUser cUser config = do
@@ -256,13 +259,54 @@ generateUser cUser config = do
   let peers = cpeers cUser
   return (User name privateKey publicKey presharedKey address port endPoint preUp preDown postUp postDown keepAlive peers)
 
+updateUserInConfig :: WGConfig -> CmdUser -> Either String WGConfig
+updateUserInConfig config user =
+  if userInConfig config $ cname user
+    then Right $ updateUser config user
+    else Left "User not in config"
+  
+updateUser :: WGConfig -> CmdUser -> WGConfig
+updateUser (WGConfig (user:users)) newuser =
+  if name user == cname newuser
+    then WGConfig $ (mergeUsers user newuser):updatedUsers
+    else WGConfig $ user:updatedUsers
+    where
+      updatedUsers =
+        case updateUser (WGConfig users) newuser of
+          (WGConfig users) -> users
+updateuser (WGConfig []) newuser = []
+
+mergeUsers :: User -> CmdUser -> User
+mergeUsers ouser nuser = User
+  (name ouser)
+  (updateField (cprivateKey nuser) (privateKey ouser))
+  (updateField (cpublicKey nuser) (publicKey ouser))
+  (updateField (cpresharedKey nuser) (presharedKey ouser))
+  (updateField (caddress nuser) (address ouser))
+  (updateField (cport nuser) (port ouser))
+  (updateField (cendpoint nuser) (endPoint ouser))
+  (updateField (cpreUp nuser) (preUp ouser))
+  (updateField (cpreDown nuser) (preDown ouser))
+  (updateField (cpostUp nuser) (postUp ouser))
+  (updateField (cpostDown nuser) (postDown ouser))
+  (updateField (ckeepAlive nuser) (keepAlive ouser))
+  (updatePeers (cpeers nuser) (peers ouser))
+  where
+    updateField (Just value) _ = value
+    updateField Nothing value = value
+    updatePeers (Just []) value = value
+    updatePeers (Just value) _ = Just value
+    updatePeers Nothing value = value 
 
 run :: WGConfig -> Command -> IO (Either String WGConfig)
 run config Init          = initConfig config
 -- run config (Gen name)    = putStrLn $ "Generate Client/Server Configuration file for " ++ name
-run config (Add cuser)   = do
-  user <- generateUser cuser config
-  return (addUserToConfig config user)
+run config (Add cuser)   =
+  if userInConfig config $ cname cuser
+  then return $ Left "User already in config"
+  else do
+    user <- generateUser cuser config
+    return (addUserToConfig config user)
 run config (Del name)    = return $ delUserFromConfig config name
 run config (Get name)    =
   case getUserInfo config name of
@@ -271,6 +315,6 @@ run config (Get name)    =
       putStrLn str
       return $ Right config
 run config (Update cuser) = do
-  user <- generateUser cuser config
-  return $ updateUserInConfig config user
+  print cuser
+  return $ updateUserInConfig config cuser
 -- run config (Make name)   = putStrLn "Make a self-installing script"
