@@ -32,7 +32,7 @@ data CmdUser = CmdUser
   , cpostUp :: Maybe CmdString
   , cpostDown :: Maybe CmdString
   , ckeepAlive :: Maybe KeepAlive
-  , cpeers :: Maybe [Name]
+  , cpeers :: Maybe Peers
   } deriving Show
 
 userParser :: Parser CmdUser
@@ -49,17 +49,22 @@ userParser = CmdUser
   <*> optional (commandStringParser "post-up" "POSTUP")
   <*> optional (commandStringParser "post-down" "POSTDOWN")
   <*> optional keepAliveParser
-  <*> optional peerParser
+  <*> optional mbPeerParser
 
 peerParser :: Parser [Name]
 peerParser =
   pParser
   where
-    pParser = many $ strOption $
+    pParser = some $ strOption $
       long "peer"
       <> short 'e'
       <> metavar "PEER"
       <> help "Peer Name."
+
+mbPeerParser :: Parser (Maybe [Name])
+mbPeerParser =
+  Just <$> peerParser
+  <|> flag' Nothing (long "no-peers")
 
 keepAliveParser :: Parser KeepAlive
 keepAliveParser =
@@ -73,6 +78,7 @@ keepAliveParser =
 endPointParser :: Parser EndPoint
 endPointParser =
   Just <$> endpoint
+  <|> flag' Nothing (long "no-endpoint")
   where
     endpoint = strOption $
       long "endpoint"
@@ -83,8 +89,9 @@ endPointParser =
 commandStringParser :: String -> String -> Parser CmdString
 commandStringParser longstr metastr =
   Just <$> cmdstrparser
+  <|> flag' Nothing (long $ "no-" ++ longstr)
   where
-    cmdstrparser = many (strOption $
+    cmdstrparser = some (strOption $
       long longstr
       <> metavar metastr
       <> help ("" ++ longstr ++ " commands"))
@@ -102,6 +109,7 @@ keyParser longStr shortChar metaStr = strOption $
 portParser :: Parser Port
 portParser =
   Just <$> port
+  <|> flag' Nothing (long "no-port")
   where port = strOption $ long "port" <> short 't' <> metavar "PORT" <> help "Port number"
 
 addressParser :: Parser Address
@@ -142,13 +150,13 @@ makeParser = Make
 
 commandParser :: Parser Command
 commandParser = subparser $ mconcat
-  [ command "init"   (info initParser   (progDesc "Initialize Mgmt"))
-  , command "gen"    (info genParser    (progDesc "Generate Conf files"))
-  , command "add"    (info addParser    (progDesc "Add client/server"))
-  , command "del"    (info delParser    (progDesc "Delete client/server"))
-  , command "get"    (info getParser    (progDesc "Get client/server info"))
-  , command "update" (info updateParser (progDesc "Update client/server configuration"))
-  , command "make"   (info makeParser   (progDesc "Make client/server self-installing script"))
+  [ command "init"   (info (helper <*> initParser)   (progDesc "Initialize Mgmt"))
+  , command "gen"    (info (helper <*> genParser)    (progDesc "Generate Conf files"))
+  , command "add"    (info (helper <*> addParser)    (progDesc "Add client/server"))
+  , command "del"    (info (helper <*> delParser)    (progDesc "Delete client/server"))
+  , command "get"    (info (helper <*> getParser)    (progDesc "Get client/server info"))
+  , command "update" (info (helper <*> updateParser) (progDesc "Update client/server configuration"))
+  , command "make"   (info (helper <*> makeParser)   (progDesc "Make client/server self-installing script"))
   ]
 
 type ItemIndex = Int
@@ -185,7 +193,7 @@ updateItemDescriptionParser =
 
 main :: IO ()
 main = do
-  Options configPath command <- execParser (info (optionsParser) (progDesc "WireGuard MGMT"))
+  Options configPath command <- execParser (info (helper <*> optionsParser) (progDesc "WireGuard MGMT"))
 
   homeDir <- getHomeDirectory
   let expandedDataPath = replace "~" homeDir configPath
@@ -256,7 +264,10 @@ generateUser cUser config = do
     case ckeepAlive cUser of
       Nothing -> return $ Just 25
       Just k -> return k
-  let peers = cpeers cUser
+  peers <-
+      case cpeers cUser of
+        Nothing -> return Nothing
+        Just p -> return p
   return (User name privateKey publicKey presharedKey address port endPoint preUp preDown postUp postDown keepAlive peers)
 
 updateUserInConfig :: WGConfig -> CmdUser -> Either String WGConfig
@@ -266,6 +277,7 @@ updateUserInConfig config user =
     else Left "User not in config"
   
 updateUser :: WGConfig -> CmdUser -> WGConfig
+updateuser (WGConfig []) newuser = WGConfig []
 updateUser (WGConfig (user:users)) newuser =
   if name user == cname newuser
     then WGConfig $ (mergeUsers user newuser):updatedUsers
@@ -274,7 +286,10 @@ updateUser (WGConfig (user:users)) newuser =
       updatedUsers =
         case updateUser (WGConfig users) newuser of
           (WGConfig users) -> users
-updateuser (WGConfig []) newuser = []
+updateUser (WGConfig users) newuser =
+  case users of
+    [] -> WGConfig []
+    users -> WGConfig users
 
 mergeUsers :: User -> CmdUser -> User
 mergeUsers ouser nuser = User
@@ -285,18 +300,18 @@ mergeUsers ouser nuser = User
   (updateField (caddress nuser) (address ouser))
   (updateField (cport nuser) (port ouser))
   (updateField (cendpoint nuser) (endPoint ouser))
-  (updateField (cpreUp nuser) (preUp ouser))
-  (updateField (cpreDown nuser) (preDown ouser))
-  (updateField (cpostUp nuser) (postUp ouser))
-  (updateField (cpostDown nuser) (postDown ouser))
+  (updatePeers (cpreUp nuser) (preUp ouser))
+  (updatePeers (cpreDown nuser) (preDown ouser))
+  (updatePeers (cpostUp nuser) (postUp ouser))
+  (updatePeers (cpostDown nuser) (postDown ouser))
   (updateField (ckeepAlive nuser) (keepAlive ouser))
   (updatePeers (cpeers nuser) (peers ouser))
   where
     updateField (Just value) _ = value
     updateField Nothing value = value
-    updatePeers (Just []) value = value
-    updatePeers (Just value) _ = Just value
-    updatePeers Nothing value = value 
+    updatePeers (Just (Just [])) value = value
+    updatePeers (Just (Just value)) _ = Just value
+    updatePeers (Just Nothing) _ = Nothing
 
 run :: WGConfig -> Command -> IO (Either String WGConfig)
 run config Init          = initConfig config

@@ -12,6 +12,7 @@ module Lib
   , PresharedKey
   , CmdString
   , KeepAlive
+  , Peers
   , readConfigFile
   , writeConfigFile
   , initConfig
@@ -57,6 +58,7 @@ type Name = String
 type PresharedKey = Maybe Key
 type CmdString = Maybe [String]
 type KeepAlive = Maybe Int
+type Peers = Maybe [Name]
 
 data User = User
   { name :: String
@@ -71,7 +73,7 @@ data User = User
   , postUp :: CmdString
   , postDown :: CmdString
   , keepAlive :: KeepAlive
-  , peers :: Maybe [Name]
+  , peers :: Peers
   } deriving (Show, Generic)
 instance ToJSON User
 instance FromJSON User
