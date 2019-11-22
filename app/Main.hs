@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
@@ -8,6 +9,7 @@ import System.Process
 import System.IO
 import Data.String.Utils
 import qualified Data.Text as T
+import qualified Control.Monad as M
 
 data Command =
     Init
@@ -177,7 +179,7 @@ dataPathParser = strOption $
   <> long "config"
   <> short 'c'
   <> metavar "CONFIGURATION"
-  <> help ("Path to mgmt configuration")
+  <> help "Path to mgmt configuration"
 
 itemIndexParser :: Parser ItemIndex
 itemIndexParser = argument auto (metavar "ITEMINDEX" <> help "index of item")
@@ -313,9 +315,49 @@ mergeUsers ouser nuser = User
     updatePeers (Just (Just value)) _ = Just value
     updatePeers (Just Nothing) _ = Nothing
 
+getUser :: WGConfig -> Name -> User
+getUser (WGConfig (user:users)) username = 
+  if name user == username then user
+  else getUser (WGConfig users) username
+
+genConfStr :: WGConfig -> Name -> Either String String
+genConfStr config username =
+  if userInConfig config username
+    then Right confstr
+    else Left "User not in file."
+    where
+      confstr = createStr $ getUser config username
+      createStr (User name prvkey pubkey pshkey addr port ep preup predown postup postdown keepalive peers) =
+        join "\n" 
+          [ "[Interface]"
+          , "Address = " ++ addr
+          , "PrivateKey = " ++ prvkey
+          , ""
+          , peersSection
+          ]
+      peersSection Nothing = Nothing
+      peersSection Just peerList =
+        join "\n" $ M.forM_ peerList $ createPeerSection . (getUser config)
+
+createPeerSection :: User -> String
+createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} =
+  join "\n"
+    [ "[Peer]"
+    , "PublicKey = " ++ publicKey
+    , "PresharedKey = " ++ presharedKey
+    , "AllowedIPs = " ++ address
+    , "Endpoint = " ++ endPoint
+    , "PersistentKeepalive = " ++ keepAlive
+    ] ++ "\n"
+
 run :: WGConfig -> Command -> IO (Either String WGConfig)
 run config Init          = initConfig config
--- run config (Gen name)    = putStrLn $ "Generate Client/Server Configuration file for " ++ name
+run config (Gen name)    = do
+  case genConfStr config name of
+    Left str -> return $ left str
+    Right str -> do
+      putStrLn str
+      return ()
 run config (Add cuser)   =
   if userInConfig config $ cname cuser
   then return $ Left "User already in config"
