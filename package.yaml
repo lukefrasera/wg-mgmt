@@ -1,7 +1,7 @@
 name:                wg-mgmt
 version:             0.1.0.0
 github:              "lukefrasera/wg-mgmt"
-license:             BSD3
+license:             "GPLv3"
 author:              "Luke Fraser"
 maintainer:          "lukefrasera@gmail.com"
 copyright:           "GPLv3"
