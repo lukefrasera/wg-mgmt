@@ -328,36 +328,39 @@ genConfStr config username =
     where
       confstr = createStr $ getUser config username
       createStr (User name prvkey pubkey pshkey addr port ep preup predown postup postdown keepalive peers) =
-        join "\n" 
-          [ "[Interface]"
-          , "Address = " ++ addr
-          , "PrivateKey = " ++ prvkey
-          , ""
-          , peersSection
-          ]
+        join "\n" [ x | Just x <- 
+          [ Just "[Interface]"
+          , Just $ "Address = " ++ addr
+          , Just $ "PrivateKey = " ++ prvkey
+          , Just ""
+          , peersSection peers
+          ]]
       peersSection Nothing = Nothing
-      peersSection Just peerList =
-        join "\n" $ M.forM_ peerList $ createPeerSection . (getUser config)
+      peersSection (Just peerList) =
+        Just $ join "\n" $ map (createPeerSection . (getUser config)) peerList
 
 createPeerSection :: User -> String
 createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} =
-  join "\n"
-    [ "[Peer]"
-    , "PublicKey = " ++ publicKey
-    , "PresharedKey = " ++ presharedKey
-    , "AllowedIPs = " ++ address
-    , "Endpoint = " ++ endPoint
-    , "PersistentKeepalive = " ++ keepAlive
-    ] ++ "\n"
+  join "\n" [x | Just x <-
+    [ Just "[Peer]"
+    , "PublicKey = " `combine` Just publicKey
+    , "PresharedKey = " `combine` presharedKey
+    , "AllowedIPs = " `combine` Just address
+    , "Endpoint = " `combine` endPoint
+    , "PersistentKeepalive = " `combine` (show <$> keepAlive)
+    ]]
+  where
+    combine _ Nothing = Nothing
+    combine str (Just value) = Just $ str ++ value
 
 run :: WGConfig -> Command -> IO (Either String WGConfig)
 run config Init          = initConfig config
 run config (Gen name)    = do
   case genConfStr config name of
-    Left str -> return $ left str
+    Left str -> return $ Left str
     Right str -> do
       putStrLn str
-      return ()
+      return $ Right config
 run config (Add cuser)   =
   if userInConfig config $ cname cuser
   then return $ Left "User already in config"
