@@ -10,6 +10,7 @@ import System.IO
 import Data.String.Utils
 import qualified Data.Text as T
 import qualified Control.Monad as M
+import Debug.Trace
 
 data Command =
     Init
@@ -309,11 +310,14 @@ mergeUsers ouser nuser = User
   (updateField (ckeepAlive nuser) (keepAlive ouser))
   (updatePeers (cpeers nuser) (peers ouser))
   where
+    updateField a b | trace ("updareField " ++ show a ++ " " ++ show b) False = undefined
     updateField (Just value) _ = value
     updateField Nothing value = value
+    updatePeers a b | trace ("updatePeers " ++ show a ++ " " ++ show b) False = undefined
     updatePeers (Just (Just [])) value = value
     updatePeers (Just (Just value)) _ = Just value
     updatePeers (Just Nothing) _ = Nothing
+    updatePeers Nothing value = value
 
 getUser :: WGConfig -> Name -> User
 getUser (WGConfig (user:users)) username = 
