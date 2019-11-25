@@ -101,7 +101,8 @@ commandStringParser longstr metastr =
 
 mbKeyParser :: String -> Char -> String -> Parser (Maybe Key)
 mbKeyParser longStr shortChar metaStr =
-  Just <$> (keyParser longStr shortChar metaStr)
+  Just <$> keyParser longStr shortChar metaStr
+  <|> flag' Nothing (long $ "create-" ++ longStr)
 keyParser :: String -> Char -> String -> Parser Key
 keyParser longStr shortChar metaStr = strOption $
   long longStr
@@ -229,6 +230,9 @@ generateUser cUser config = do
   -- syscall wg off of the private key
   presharedKey <-
     case cpresharedKey cUser of
+      Just Nothing -> do
+        (_, Just hout, _,_) <- createProcess(proc "wg" ["genpsk"]){std_in = CreatePipe, std_out = CreatePipe}
+        Just <$> hGetContents hout
       Just preshared -> return preshared
       Nothing -> return Nothing
   -- think about thid mechanism
@@ -310,10 +314,10 @@ mergeUsers ouser nuser = User
   (updateField (ckeepAlive nuser) (keepAlive ouser))
   (updatePeers (cpeers nuser) (peers ouser))
   where
-    updateField a b | trace ("updareField " ++ show a ++ " " ++ show b) False = undefined
+    -- updateField a b | trace ("updareField " ++ show a ++ " " ++ show b) False = undefined
     updateField (Just value) _ = value
     updateField Nothing value = value
-    updatePeers a b | trace ("updatePeers " ++ show a ++ " " ++ show b) False = undefined
+    -- updatePeers a b | trace ("updatePeers " ++ show a ++ " " ++ show b) False = undefined
     updatePeers (Just (Just [])) value = value
     updatePeers (Just (Just value)) _ = Just value
     updatePeers (Just Nothing) _ = Nothing
@@ -341,7 +345,7 @@ genConfStr config username =
           ]]
       peersSection Nothing = Nothing
       peersSection (Just peerList) =
-        Just $ join "\n" $ map (createPeerSection . (getUser config)) peerList
+        Just $ join "\n" $ map (createPeerSection . getUser config) peerList
 
 createPeerSection :: User -> String
 createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} =
@@ -359,7 +363,7 @@ createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} =
 
 run :: WGConfig -> Command -> IO (Either String WGConfig)
 run config Init          = initConfig config
-run config (Gen name)    = do
+run config (Gen name)    =
   case genConfStr config name of
     Left str -> return $ Left str
     Right str -> do
