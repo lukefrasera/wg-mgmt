@@ -11,6 +11,10 @@ import Data.String.Utils
 import qualified Data.Text as T
 import qualified Control.Monad as M
 import Debug.Trace
+import Text.Read
+import Data.IP
+import qualified Data.List as L
+import Data.Maybe
 
 data Command =
     Init
@@ -27,7 +31,7 @@ data CmdUser = CmdUser
   , cprivateKey :: Maybe Key
   , cpublicKey :: Maybe Key
   , cpresharedKey :: Maybe PresharedKey
-  , caddress :: Maybe Address
+  , caddress :: Maybe [Maybe CIDR]
   , cport :: Maybe Port
   , cendpoint :: Maybe EndPoint
   , cpreUp :: Maybe CmdString
@@ -44,7 +48,7 @@ userParser = CmdUser
   <*> optional (keyParser "private" 'p' "PRIVATE")
   <*> optional (keyParser "public" 'b' "PUBLIC")
   <*> optional (mbKeyParser "shared" 's' "SHARED")
-  <*> optional addressParser
+  <*> optional mbCidrParser
   <*> optional portParser
   <*> optional endPointParser
   <*> optional (commandStringParser "pre-up" "PREUP")
@@ -122,6 +126,45 @@ addressParser = strOption $
   <> short 'a'
   <> metavar "ADDRESS"
   <> help "Address of the user"
+
+cidrParser :: Parser [String]
+cidrParser = some $ strOption $
+  long "available"
+  <> short 'a'
+  <> metavar "AVAILABLE"
+  <> help "Available address of user"
+
+mbCidrParser :: Parser [Maybe CIDR]
+mbCidrParser = map cidrFromString <$> cidrParser
+
+cidrFromString :: String -> Maybe CIDR
+cidrFromString s =
+  case split "/" s of
+    [] -> Nothing
+    x:[] -> Nothing
+    saddr:smask:_ -> do
+      CIDR <$> toAddress saddr <*> (makeAddrRange <$> toAddress saddr <*> toMask smask)
+
+toAddress :: String -> Maybe IPv4
+toAddress s =
+  if ((length octet) == 4)
+    then return $ toIPv4 . liftMbList $ octet
+    else Nothing
+  where
+    validOctet = mapM inOctetRange octet
+    octet = map readMaybe $ split "." s :: [Maybe Int]
+    liftMbList [] = []
+    liftMbList (x:xs) = 
+      case x of
+        Just value -> value:liftMbList xs
+        Nothing -> liftMbList xs
+
+inOctetRange :: Maybe Int -> Maybe Bool
+inOctetRange (Just id) = Just (id >= 0)
+
+
+toMask :: String -> Maybe Int
+toMask = readMaybe
 
 initParser :: Parser Command
 initParser = pure Init
@@ -212,6 +255,7 @@ main = do
       eiConfig <- run config command
       case eiConfig of
         Left str -> putStrLn $ "Error: " ++ str
+        Right (WGConfig []) -> putStrLn "Nothing to write."
         Right modConfig -> writeConfigFile expandedDataPath modConfig
       return ()
 
@@ -221,26 +265,33 @@ generateUser cUser config = do
   let name = cname cUser
   privateKey <- do
     (_, Just hout, _, _) <- createProcess (proc "wg" ["genkey"]){std_in = CreatePipe, std_out = CreatePipe}
-    hGetContents hout
+    strip <$> hGetContents hout
   -- syscal wg to generate key
   publicKey <- do
     (Just hin, Just hout, _, _) <- createProcess (proc "wg" ["pubkey"]){std_in = CreatePipe , std_out = CreatePipe}
     hPutStr hin privateKey
-    hGetContents hout
+    strip <$> hGetContents hout
   -- syscall wg off of the private key
   presharedKey <-
     case cpresharedKey cUser of
       Just Nothing -> do
         (_, Just hout, _,_) <- createProcess(proc "wg" ["genpsk"]){std_in = CreatePipe, std_out = CreatePipe}
-        Just <$> hGetContents hout
+        Just . strip <$> hGetContents hout
       Just preshared -> return preshared
       Nothing -> return Nothing
   -- think about thid mechanism
   address <-
     case caddress cUser of
-      Just addr -> return addr
-      Nothing -> return $ getAvailableAddress config 
-  -- generate available ip
+      Just addr -> case convertedAddrs of
+          [] -> return [(CIDR (read newAddress) (read (newAddress ++ "/32")))]
+          v -> return v
+        where
+          convertedAddrs = catMaybes addr
+          newAddress = getAvailableAddress config
+      Nothing -> return [(CIDR (read newAddress) (read (newAddress ++ "/32")))]
+        where
+          newAddress = getAvailableAddress config
+          -- generate available ip
   port <-
     case cport cUser of
       Nothing -> return Nothing
@@ -253,7 +304,9 @@ generateUser cUser config = do
   -- user only if specified
   preUp <-
     case cpreUp cUser of
-      Nothing -> return Nothing
+      Nothing -> return $ Just $
+        [ "ip -4 route del 10.0.0.0/9 dev %i"
+        , "ip -4 route add 10.0.0.0/9 dev %i metric 601"]
       Just cmd -> return cmd
   preDown <-
     case cpreDown cUser of
@@ -280,8 +333,26 @@ generateUser cUser config = do
 updateUserInConfig :: WGConfig -> CmdUser -> Either String WGConfig
 updateUserInConfig config user =
   if userInConfig config $ cname user
-    then Right $ updateUser config user
+    then Right $ updatePeers (updateUser config user) $ fromCmdUser user
     else Left "User not in config"
+    where
+      updatePeers (WGConfig ps) u= WGConfig $ addPeerAdjacent ps u
+
+fromCmdUser :: CmdUser -> User
+fromCmdUser (CmdUser name privatekey publickey presharedkey availableAddresses port endPoint preup predown postup postdown keepalive peers) = User
+  name
+  (fromMaybe "" privatekey)
+  (fromMaybe "" publickey)
+  (fromMaybe Nothing presharedkey)
+  ([a | Just a <- (fromMaybe [] availableAddresses)])
+  (fromMaybe Nothing port)
+  (fromMaybe Nothing endPoint)
+  (fromMaybe Nothing preup)
+  (fromMaybe Nothing predown)
+  (fromMaybe Nothing postup)
+  (fromMaybe Nothing postdown)
+  (fromMaybe Nothing keepalive)
+  (fromMaybe Nothing peers)
   
 updateUser :: WGConfig -> CmdUser -> WGConfig
 updateuser (WGConfig []) newuser = WGConfig []
@@ -304,7 +375,7 @@ mergeUsers ouser nuser = User
   (updateField (cprivateKey nuser) (privateKey ouser))
   (updateField (cpublicKey nuser) (publicKey ouser))
   (updateField (cpresharedKey nuser) (presharedKey ouser))
-  (updateField (caddress nuser) (address ouser))
+  (updateField (catMaybes <$> caddress nuser) (availableAddresses ouser))
   (updateField (cport nuser) (port ouser))
   (updateField (cendpoint nuser) (endPoint ouser))
   (updatePeers (cpreUp nuser) (preUp ouser))
@@ -314,6 +385,8 @@ mergeUsers ouser nuser = User
   (updateField (ckeepAlive nuser) (keepAlive ouser))
   (updatePeers (cpeers nuser) (peers ouser))
   where
+    toCIDR ((a, r):xs) = (read a, read r):toCIDR xs
+    toCIDR [] = []
     -- updateField a b | trace ("updareField " ++ show a ++ " " ++ show b) False = undefined
     updateField (Just value) _ = value
     updateField Nothing value = value
@@ -335,31 +408,45 @@ genConfStr config username =
     else Left "User not in file."
     where
       confstr = createStr $ getUser config username
+      showCIDR (CIDR{caddr, crange}) = (show caddr ++ "/" ++ (show . snd . addrRangePair) crange)
       createStr (User name prvkey pubkey pshkey addr port ep preup predown postup postdown keepalive peers) =
-        join "\n" [ x | Just x <- 
+        join "\n" [ x | Just x <-
           [ Just "[Interface]"
-          , Just $ "Address = " ++ addr
+          , Just $ "Address = " ++ (join "," $ map showCIDR addr)
           , Just $ "PrivateKey = " ++ prvkey
+          , "PresharedKey = " `combine` pshkey
+          , cmdSection "PreUp = " preup
+          , cmdSection "PostUp = " postup
+          , cmdSection "PreDown = " predown
+          , cmdSection "PostDown = " postdown
           , Just ""
           , peersSection peers
           ]]
+      combine _ Nothing = Nothing
+      combine str (Just value) = Just $ str ++ value
       peersSection Nothing = Nothing
       peersSection (Just peerList) =
-        Just $ join "\n" $ map (createPeerSection . getUser config) peerList
+        Just $ join "\n\n" $ map (createPeerSection . getUser config) peerList
+
+cmdSection :: String -> Maybe [String] -> Maybe String
+cmdSection _ Nothing = Nothing
+cmdSection str (Just cmds) = Just $ join "\n" $ map (str ++) cmds
 
 createPeerSection :: User -> String
-createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} =
+-- createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} | trace ("createPeerSection " ++ show publicKey ++ " " ++ show presharedKey ++ " " ++ show address ++ " " ++ show endPoint ++ " " ++ show keepAlive) False = undefined
+createPeerSection User{publicKey, presharedKey, availableAddresses, endPoint, keepAlive} =
   join "\n" [x | Just x <-
     [ Just "[Peer]"
     , "PublicKey = " `combine` Just publicKey
     , "PresharedKey = " `combine` presharedKey
-    , "AllowedIPs = " `combine` Just address
+    , "AllowedIPs = " `combine` (Just $ join "," $ map showCIDR availableAddresses)
     , "Endpoint = " `combine` endPoint
     , "PersistentKeepalive = " `combine` (show <$> keepAlive)
     ]]
   where
     combine _ Nothing = Nothing
     combine str (Just value) = Just $ str ++ value
+    showCIDR (CIDR{caddr, crange}) = (show caddr ++ "/" ++ (show . snd . addrRangePair) crange)
 
 run :: WGConfig -> Command -> IO (Either String WGConfig)
 run config Init          = initConfig config

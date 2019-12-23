@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances  #-}
 
 module Lib
   ( User (..)
@@ -13,10 +14,13 @@ module Lib
   , CmdString
   , KeepAlive
   , Peers
+  , CIDR(..)
+  , Cidr
   , readConfigFile
   , writeConfigFile
   , initConfig
   , addUserToConfig
+  , addPeerAdjacent
   , getAvailableAddress
   , addIP
   , ipToOctet
@@ -44,6 +48,9 @@ import qualified Data.List as L
 import Data.IP
 import qualified Data.Text.Lazy.Encoding as T
 import Data.Text.Lazy as T
+import qualified Data.Text as DT
+import Data.Maybe
+import qualified Data.Set as S
 
 
 data WGConfig = WGConfig [User] deriving (Generic, Show)
@@ -52,6 +59,9 @@ instance FromJSON WGConfig
 
 type Key = String
 type Address = String
+type Subnet = String
+type Cidr = (Address, Subnet)
+-- type CIDR = (IPv4, AddrRange IPv4)
 type Port = Maybe String
 type EndPoint = Maybe String
 type Name = String
@@ -60,12 +70,34 @@ type CmdString = Maybe [String]
 type KeepAlive = Maybe Int
 type Peers = Maybe [Name]
 
+data CIDR = CIDR
+  { caddr :: IPv4
+  , crange :: AddrRange IPv4
+  } deriving (Show, Generic)
+instance ToJSON CIDR
+instance FromJSON CIDR
+  -- parseJSON = withObject "CIDR" $ \v -> CIDR
+  --   <$> v .: "addr"
+  --   <*> v .: "range"
+
+instance ToJSON IPv4 where
+  toJSON ip = String . DT.pack . show $ ip
+  -- toEncoding ip = Encoding' . String . DT.pack . show $ ip
+instance Show a => ToJSON (AddrRange a) where
+  toJSON range = String . DT.pack . show $ range
+
+instance FromJSON IPv4 where
+  parseJSON = withText "ipv4" (\x -> return (read . DT.unpack $ x))
+
+instance FromJSON (AddrRange IPv4) where
+  parseJSON = withText "range" (\x -> return (read . DT.unpack $ x))
+
 data User = User
   { name :: String
   , privateKey :: Key
   , publicKey :: Key
   , presharedKey :: PresharedKey
-  , address :: Address
+  , availableAddresses :: [CIDR]
   , port :: Port
   , endPoint :: EndPoint
   , preUp :: CmdString
@@ -111,17 +143,34 @@ initConfig config = do
 addUserToConfig :: WGConfig -> User -> Either String WGConfig
 addUserToConfig (WGConfig users) user
   | userInConfig (WGConfig users) (name user) = Left "User already in config"
-  | addressInConfig (WGConfig users) (address user) = Left $ "Address " ++ address user ++ " Taken"
-  | otherwise = Right (WGConfig $ user:users)
+  | addressInConfig (WGConfig users) address = Left $ "Address " ++ show address ++ " Taken"
+  | otherwise = Right $ WGConfig (user:addPeerAdjacent users user)
+  where
+    address = caddr $ L.head $ availableAddresses user
+
+addPeerAdjacent :: [User] -> User -> [User]
+-- addPeerAdjacent users user | trace ("config " ++ show users ++ "\n\n user: " ++ show user ++ "\n") False = undefined
+addPeerAdjacent users user =
+  case peers user of
+    Just npeers -> L.map (\wuser -> listAppendPeers wuser npeers) users
+      where
+        -- listAppendPeers u ps | trace ("User: " ++ show u ++ "\n\n Peers: " ++ show ps ++ "\n") False = undefined
+        listAppendPeers u [] = u
+        listAppendPeers u (p:ps) = if p == name u
+          then listAppendPeers u{peers = Just unionpeers} ps
+          else listAppendPeers u ps
+            where
+              unionpeers = S.toList . S.fromList $ name user : fromMaybe [] (peers u)
+    Nothing -> users
 
 userInConfig :: WGConfig -> Name -> Bool
 userInConfig (WGConfig []) username = False
 userInConfig (WGConfig users) username =
   L.any (\u -> (name u) == username) users
 
-addressInConfig :: WGConfig -> Address -> Bool
-addressInConfig (WGConfig users) addr =
-  L.any (\u -> (address u) == addr) users
+addressInConfig :: WGConfig -> IPv4 -> Bool
+addressInConfig (WGConfig users) address =
+  L.any (\u -> (caddr (L.head (availableAddresses u))) == address) users
 
 
 getAvailableAddress :: WGConfig -> String
@@ -133,6 +182,7 @@ getAvailableAddress (WGConfig users) =
     Just ip -> show ip
   where
     addresses = [address user | user <- users]
+    address = show . caddr . L.head . availableAddresses
 
 ipToOctet :: IPv4 -> [Int]
 ipToOctet = fromIPv4

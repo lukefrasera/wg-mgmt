@@ -31,12 +31,13 @@ dependencies:
 - MissingH
 - process
 - iproute
+- containers
 
 library:
   source-dirs: src
 
 executables:
-  wg-mgmt-exe:
+  wg-mgmt:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
