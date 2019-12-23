@@ -414,6 +414,7 @@ genConfStr config username =
           [ Just "[Interface]"
           , Just $ "Address = " ++ (join "," $ map showCIDR addr)
           , Just $ "PrivateKey = " ++ prvkey
+          , "ListenPort = " `combine` port
           , cmdSection "PreUp = " preup
           , cmdSection "PostUp = " postup
           , cmdSection "PreDown = " predown
