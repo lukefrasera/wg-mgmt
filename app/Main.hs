@@ -414,7 +414,6 @@ genConfStr config username =
           [ Just "[Interface]"
           , Just $ "Address = " ++ (join "," $ map showCIDR addr)
           , Just $ "PrivateKey = " ++ prvkey
-          , "PresharedKey = " `combine` pshkey
           , cmdSection "PreUp = " preup
           , cmdSection "PostUp = " postup
           , cmdSection "PreDown = " predown
@@ -426,15 +425,15 @@ genConfStr config username =
       combine str (Just value) = Just $ str ++ value
       peersSection Nothing = Nothing
       peersSection (Just peerList) =
-        Just $ join "\n\n" $ map (createPeerSection . getUser config) peerList
+        Just $ join "\n\n" $ map ((createPeerSection $ getUser config username) . getUser config ) peerList
 
 cmdSection :: String -> Maybe [String] -> Maybe String
 cmdSection _ Nothing = Nothing
 cmdSection str (Just cmds) = Just $ join "\n" $ map (str ++) cmds
 
-createPeerSection :: User -> String
+createPeerSection :: User -> User -> String
 -- createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} | trace ("createPeerSection " ++ show publicKey ++ " " ++ show presharedKey ++ " " ++ show address ++ " " ++ show endPoint ++ " " ++ show keepAlive) False = undefined
-createPeerSection User{publicKey, presharedKey, availableAddresses, endPoint, keepAlive} =
+createPeerSection User{presharedKey} User{publicKey, availableAddresses, endPoint, keepAlive} =
   join "\n" [x | Just x <-
     [ Just "[Peer]"
     , "PublicKey = " `combine` Just publicKey
