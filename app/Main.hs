@@ -304,9 +304,7 @@ generateUser cUser config = do
   -- user only if specified
   preUp <-
     case cpreUp cUser of
-      Nothing -> return $ Just $
-        [ "ip -4 route del 10.0.0.0/9 dev %i"
-        , "ip -4 route add 10.0.0.0/9 dev %i metric 601"]
+      Nothing -> return Nothing
       Just cmd -> return cmd
   preDown <-
     case cpreDown cUser of
@@ -314,7 +312,9 @@ generateUser cUser config = do
       Just cmd -> return cmd
   postUp <-
     case cpostUp cUser of
-      Nothing -> return Nothing
+      Nothing -> return $ Just $
+        [ "ip -4 route del 10.0.0.0/9 dev %i"
+        , "ip -4 route add 10.0.0.0/9 dev %i metric 601"]
       Just cmd -> return cmd
   postDown <-
     case cpostUp cUser of
