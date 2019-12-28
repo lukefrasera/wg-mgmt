@@ -14,6 +14,7 @@ module Lib
   , CmdString
   , KeepAlive
   , Peers
+  , Table
   , CIDR(..)
   , Cidr
   , readConfigFile
@@ -69,6 +70,7 @@ type PresharedKey = Maybe Key
 type CmdString = Maybe [String]
 type KeepAlive = Maybe Int
 type Peers = Maybe [Name]
+type Table = Maybe String
 
 data CIDR = CIDR
   { caddr :: IPv4
@@ -106,6 +108,7 @@ data User = User
   , postDown :: CmdString
   , keepAlive :: KeepAlive
   , peers :: Peers
+  , table :: Table
   } deriving (Show, Generic)
 instance ToJSON User
 instance FromJSON User

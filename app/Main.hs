@@ -40,6 +40,7 @@ data CmdUser = CmdUser
   , cpostDown :: Maybe CmdString
   , ckeepAlive :: Maybe KeepAlive
   , cpeers :: Maybe Peers
+  , ctable :: Maybe Table
   } deriving Show
 
 userParser :: Parser CmdUser
@@ -57,6 +58,18 @@ userParser = CmdUser
   <*> optional (commandStringParser "post-down" "POSTDOWN")
   <*> optional keepAliveParser
   <*> optional mbPeerParser
+  <*> optional tableParser
+
+tableParser :: Parser Table
+tableParser = 
+  Just <$> tableparse
+  <|> flag' Nothing (long "no-table")
+  where
+    tableparse = strOption $
+      long "table"
+      <> short 't'
+      <> metavar "TABLE"
+      <> help "Network table"
 
 peerParser :: Parser [Name]
 peerParser =
@@ -328,7 +341,11 @@ generateUser cUser config = do
       case cpeers cUser of
         Nothing -> return Nothing
         Just p -> return p
-  return (User name privateKey publicKey presharedKey address port endPoint preUp preDown postUp postDown keepAlive peers)
+  table <-
+      case ctable cUser of
+        Nothing -> return Nothing
+        Just p -> return p
+  return (User name privateKey publicKey presharedKey address port endPoint preUp preDown postUp postDown keepAlive peers table)
 
 updateUserInConfig :: WGConfig -> CmdUser -> Either String WGConfig
 updateUserInConfig config user =
@@ -339,7 +356,7 @@ updateUserInConfig config user =
       updatePeers (WGConfig ps) u= WGConfig $ addPeerAdjacent ps u
 
 fromCmdUser :: CmdUser -> User
-fromCmdUser (CmdUser name privatekey publickey presharedkey availableAddresses port endPoint preup predown postup postdown keepalive peers) = User
+fromCmdUser (CmdUser name privatekey publickey presharedkey availableAddresses port endPoint preup predown postup postdown keepalive peers table) = User
   name
   (fromMaybe "" privatekey)
   (fromMaybe "" publickey)
@@ -353,6 +370,7 @@ fromCmdUser (CmdUser name privatekey publickey presharedkey availableAddresses p
   (fromMaybe Nothing postdown)
   (fromMaybe Nothing keepalive)
   (fromMaybe Nothing peers)
+  (fromMaybe Nothing table)
   
 updateUser :: WGConfig -> CmdUser -> WGConfig
 updateuser (WGConfig []) newuser = WGConfig []
@@ -384,6 +402,7 @@ mergeUsers ouser nuser = User
   (updatePeers (cpostDown nuser) (postDown ouser))
   (updateField (ckeepAlive nuser) (keepAlive ouser))
   (updatePeers (cpeers nuser) (peers ouser))
+  (updateField (ctable nuser) (table ouser))
   where
     toCIDR ((a, r):xs) = (read a, read r):toCIDR xs
     toCIDR [] = []
@@ -409,12 +428,13 @@ genConfStr config username =
     where
       confstr = createStr $ getUser config username
       showCIDR (CIDR{caddr, crange}) = (show caddr ++ "/" ++ (show . snd . addrRangePair) crange)
-      createStr (User name prvkey pubkey pshkey addr port ep preup predown postup postdown keepalive peers) =
+      createStr (User name prvkey pubkey pshkey addr port ep preup predown postup postdown keepalive peers table) =
         join "\n" [ x | Just x <-
           [ Just "[Interface]"
           , Just $ "Address = " ++ (join "," $ map showCIDR addr)
           , Just $ "PrivateKey = " ++ prvkey
           , "ListenPort = " `combine` port
+          , "Table = " `combine` table
           , cmdSection "PreUp = " preup
           , cmdSection "PostUp = " postup
           , cmdSection "PreDown = " predown
@@ -434,9 +454,10 @@ cmdSection str (Just cmds) = Just $ join "\n" $ map (str ++) cmds
 
 createPeerSection :: User -> User -> String
 -- createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} | trace ("createPeerSection " ++ show publicKey ++ " " ++ show presharedKey ++ " " ++ show address ++ " " ++ show endPoint ++ " " ++ show keepAlive) False = undefined
-createPeerSection User{presharedKey} User{publicKey, availableAddresses, endPoint, keepAlive} =
+createPeerSection User{presharedKey} User{name, publicKey, availableAddresses, endPoint, keepAlive} =
   join "\n" [x | Just x <-
-    [ Just "[Peer]"
+    [ Just $ "=== [" ++ name ++ "] ==="
+    , Just "[Peer]"
     , "PublicKey = " `combine` Just publicKey
     , "PresharedKey = " `combine` presharedKey
     , "AllowedIPs = " `combine` (Just $ join "," $ map showCIDR availableAddresses)
