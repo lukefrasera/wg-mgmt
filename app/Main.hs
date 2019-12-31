@@ -456,7 +456,7 @@ createPeerSection :: User -> User -> String
 -- createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} | trace ("createPeerSection " ++ show publicKey ++ " " ++ show presharedKey ++ " " ++ show address ++ " " ++ show endPoint ++ " " ++ show keepAlive) False = undefined
 createPeerSection User{presharedKey} User{name, publicKey, availableAddresses, endPoint, keepAlive} =
   join "\n" [x | Just x <-
-    [ Just $ "=== [" ++ name ++ "] ==="
+    [ Just $ "#=== [" ++ name ++ "] ===#"
     , Just "[Peer]"
     , "PublicKey = " `combine` Just publicKey
     , "PresharedKey = " `combine` presharedKey
