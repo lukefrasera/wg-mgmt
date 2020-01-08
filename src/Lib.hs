@@ -180,12 +180,12 @@ getAvailableAddress :: WGConfig -> String
 getAvailableAddress (WGConfig []) =
   error "User must supply first IP"
 getAvailableAddress (WGConfig users) =
-  case addIP (read (L.maximum addresses)) 1 of
+  case addIP (L.maximum addresses) 1 of
     Nothing -> ""
     Just ip -> show ip
   where
     addresses = [address user | user <- users]
-    address = show . caddr . L.head . availableAddresses
+    address = caddr . L.head . availableAddresses
 
 ipToOctet :: IPv4 -> [Int]
 ipToOctet = fromIPv4
@@ -206,7 +206,7 @@ ipFromInt i =
 -- TODO: Check if new ipv4 is valid otherwise return Nothing
 addIP :: IPv4 -> Integer-> (Maybe IPv4)
 addIP ip n =
-  Just (ipFromInt $ (ipToInt ip ) + n)
+  Just (ipFromInt $ ipToInt ip + n)
 
 delUserFromConfig :: WGConfig -> Name -> Either String WGConfig
 delUserFromConfig config name =

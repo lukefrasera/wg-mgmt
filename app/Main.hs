@@ -467,7 +467,8 @@ createPeerSection User{presharedKey} User{name, publicKey, availableAddresses, e
   where
     combine _ Nothing = Nothing
     combine str (Just value) = Just $ str ++ value
-    showCIDR (CIDR{caddr, crange}) = (show caddr ++ "/" ++ (show . snd . addrRangePair) crange)
+    -- showCIDR (CIDR{caddr, crange}) = (show caddr ++ "/" ++ (show . snd . addrRangePair) crange)
+    showCIDR (CIDR{caddr, crange}) = show crange
 
 run :: WGConfig -> Command -> IO (Either String WGConfig)
 run config Init          = initConfig config
