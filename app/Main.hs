@@ -430,7 +430,8 @@ genConfStr config username =
       showCIDR (CIDR{caddr, crange}) = (show caddr ++ "/" ++ (show . snd . addrRangePair) crange)
       createStr (User name prvkey pubkey pshkey addr port ep preup predown postup postdown keepalive peers table) =
         join "\n" [ x | Just x <-
-          [ Just "[Interface]"
+          [ Just $ "# === [" ++ name  ++ "] === #"
+          , Just "[Interface]"
           , Just $ "Address = " ++ (join "," $ map showCIDR addr)
           , Just $ "PrivateKey = " ++ prvkey
           , "ListenPort = " `combine` port
@@ -456,7 +457,7 @@ createPeerSection :: User -> User -> String
 -- createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} | trace ("createPeerSection " ++ show publicKey ++ " " ++ show presharedKey ++ " " ++ show address ++ " " ++ show endPoint ++ " " ++ show keepAlive) False = undefined
 createPeerSection User{presharedKey} User{name, publicKey, availableAddresses, endPoint, keepAlive} =
   join "\n" [x | Just x <-
-    [ Just $ "#=== [" ++ name ++ "] ===#"
+    [ Just $ "# === [" ++ name ++ "] === #"
     , Just "[Peer]"
     , "PublicKey = " `combine` Just publicKey
     , "PresharedKey = " `combine` presharedKey
