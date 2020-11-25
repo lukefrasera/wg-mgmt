@@ -54,7 +54,7 @@ import Data.Maybe
 import qualified Data.Set as S
 
 
-data WGConfig = WGConfig [User] deriving (Generic, Show)
+newtype WGConfig = WGConfig [User] deriving (Generic, Show)
 instance ToJSON WGConfig
 instance FromJSON WGConfig
 
@@ -155,7 +155,7 @@ addPeerAdjacent :: [User] -> User -> [User]
 -- addPeerAdjacent users user | trace ("config " ++ show users ++ "\n\n user: " ++ show user ++ "\n") False = undefined
 addPeerAdjacent users user =
   case peers user of
-    Just npeers -> L.map (\wuser -> listAppendPeers wuser npeers) users
+    Just npeers -> L.map (`listAppendPeers` npeers) users
       where
         -- listAppendPeers u ps | trace ("User: " ++ show u ++ "\n\n Peers: " ++ show ps ++ "\n") False = undefined
         listAppendPeers u [] = u
@@ -167,22 +167,20 @@ addPeerAdjacent users user =
     Nothing -> users
 
 userInConfig :: WGConfig -> Name -> Bool
-userInConfig (WGConfig []) username = False
+userInConfig (WGConfig []) _ = False
 userInConfig (WGConfig users) username =
-  L.any (\u -> (name u) == username) users
+  L.any (\u -> name u == username) users
 
 addressInConfig :: WGConfig -> IPv4 -> Bool
 addressInConfig (WGConfig users) address =
-  L.any (\u -> (caddr (L.head (availableAddresses u))) == address) users
+  L.any (\u -> caddr (L.head (availableAddresses u)) == address) users
 
 
 getAvailableAddress :: WGConfig -> String
 getAvailableAddress (WGConfig []) =
   error "User must supply first IP"
 getAvailableAddress (WGConfig users) =
-  case addIP (L.maximum addresses) 1 of
-    Nothing -> ""
-    Just ip -> show ip
+  maybe "" show (addIP (L.maximum addresses) 1)
   where
     addresses = [address user | user <- users]
     address = caddr . L.head . availableAddresses
@@ -193,7 +191,7 @@ ipToOctet = fromIPv4
 
 ipToInt :: IPv4 -> Integer
 ipToInt =
-  sum . L.map (\(n,o) -> toInteger o * 256 ^ n) . L.zip [0..] . L.reverse . ipToOctet
+  sum . L.zipWith (\n o -> toInteger o * 256 ^ n) [0 .. ] . L.reverse . ipToOctet
 
 intToOctet :: Integer -> [Integer]
 intToOctet 0 = []
@@ -210,9 +208,10 @@ addIP ip n =
 
 delUserFromConfig :: WGConfig -> Name -> Either String WGConfig
 delUserFromConfig config name =
-  case userInConfig config name of
-    False -> Left "User not found"
-    True -> Right $ removeUser config name
+  if userInConfig config name then
+    Right $ removeUser config name
+  else
+    Left "User not found"
 
 removeUser :: WGConfig -> Name -> WGConfig
 removeUser (WGConfig users) username =
@@ -220,9 +219,10 @@ removeUser (WGConfig users) username =
 
 getUserInfo :: WGConfig -> Name -> Either String String
 getUserInfo config name =
-  case userInConfig config name of
-    False -> Left "User not found"
-    True -> Right $ T.unpack $ T.decodeUtf8 $ encodePretty user
+  if userInConfig config name then
+    Right $ T.unpack $ T.decodeUtf8 $ encodePretty user
+  else
+    Left "User not found"
     where
       user = lookupUser config name
 

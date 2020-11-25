@@ -160,7 +160,7 @@ cidrFromString s =
 
 toAddress :: String -> Maybe IPv4
 toAddress s =
-  if ((length octet) == 4)
+  if length octet == 4
     then return $ toIPv4 . liftMbList $ octet
     else Nothing
   where
@@ -249,7 +249,7 @@ itemDescriptionValueParser =
 updateItemDescriptionParser :: Parser ItemDescription
 updateItemDescriptionParser =
   Just <$> itemDescriptionValueParser
-  <|> flag' Nothing (long "clear-desc") -- "--clear-desc"
+  <|> flag' Nothing (long "clear-desc")
 
 main :: IO ()
 main = do
@@ -296,12 +296,12 @@ generateUser cUser config = do
   address <-
     case caddress cUser of
       Just addr -> case convertedAddrs of
-          [] -> return [(CIDR (read newAddress) (read (newAddress ++ "/32")))]
+          [] -> return [CIDR (read newAddress) (read (newAddress ++ "/32"))]
           v -> return v
         where
           convertedAddrs = catMaybes addr
           newAddress = getAvailableAddress config
-      Nothing -> return [(CIDR (read newAddress) (read (newAddress ++ "/32")))]
+      Nothing -> return [CIDR (read newAddress) (read (newAddress ++ "/32"))]
         where
           newAddress = getAvailableAddress config
           -- generate available ip
@@ -361,7 +361,7 @@ fromCmdUser (CmdUser name privatekey publickey presharedkey availableAddresses p
   (fromMaybe "" privatekey)
   (fromMaybe "" publickey)
   (fromMaybe Nothing presharedkey)
-  ([a | Just a <- (fromMaybe [] availableAddresses)])
+  (catMaybes (fromMaybe [] availableAddresses))
   (fromMaybe Nothing port)
   (fromMaybe Nothing endPoint)
   (fromMaybe Nothing preup)
@@ -376,7 +376,7 @@ updateUser :: WGConfig -> CmdUser -> WGConfig
 updateuser (WGConfig []) newuser = WGConfig []
 updateUser (WGConfig (user:users)) newuser =
   if name user == cname newuser
-    then WGConfig $ (mergeUsers user newuser):updatedUsers
+    then WGConfig $ mergeUsers user newuser:updatedUsers
     else WGConfig $ user:updatedUsers
     where
       updatedUsers =
@@ -447,7 +447,7 @@ genConfStr config username =
       combine str (Just value) = Just $ str ++ value
       peersSection Nothing = Nothing
       peersSection (Just peerList) =
-        Just $ join "\n\n" $ map ((createPeerSection $ getUser config username) . getUser config ) peerList
+        Just $ join "\n\n" $ map (createPeerSection (getUser config username) . getUser config) peerList
 
 cmdSection :: String -> Maybe [String] -> Maybe String
 cmdSection _ Nothing = Nothing
@@ -469,7 +469,7 @@ createPeerSection User{presharedKey} User{name, publicKey, availableAddresses, e
     combine _ Nothing = Nothing
     combine str (Just value) = Just $ str ++ value
     -- showCIDR (CIDR{caddr, crange}) = (show caddr ++ "/" ++ (show . snd . addrRangePair) crange)
-    showCIDR (CIDR{caddr, crange}) = show crange
+    showCIDR CIDR{caddr, crange} = show crange
 
 run :: WGConfig -> Command -> IO (Either String WGConfig)
 run config Init          = initConfig config
