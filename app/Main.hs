@@ -326,8 +326,8 @@ generateUser cUser config = do
   postUp <-
     case cpostUp cUser of
       Nothing -> return $ Just $
-        [ "ip -4 route del 10.0.0.0/8 dev %i"
-        , "ip -4 route add 10.0.0.0/8 dev %i metric 601"]
+        [ "ip -4 route del 10.20.0.0/16 dev %i"
+        , "ip -4 route add 10.20.0.0/16 dev %i metric 601"]
       Just cmd -> return cmd
   postDown <-
     case cpostUp cUser of
