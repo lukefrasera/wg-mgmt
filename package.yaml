@@ -32,6 +32,7 @@ dependencies:
 - process
 - iproute
 - containers
+- lens
 
 library:
   source-dirs: src

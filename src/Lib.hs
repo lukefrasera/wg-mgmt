@@ -1,37 +1,41 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleInstances  #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 module Lib
-  ( User (..)
-  , WGConfig (..)
-  , Key
-  , Address
-  , Port
-  , EndPoint
-  , Name
-  , PresharedKey
-  , CmdString
-  , KeepAlive
-  , Peers
-  , Table
-  , CIDR(..)
-  , Cidr
-  , readConfigFile
-  , writeConfigFile
-  , initConfig
-  , addUserToConfig
-  , addPeerAdjacent
-  , getAvailableAddress
-  , addIP
-  , ipToOctet
-  , ipToInt
-  , intToOctet
-  , ipFromInt
-  , delUserFromConfig
-  , getUserInfo
-  , userInConfig
-  ) where
+  -- ( User (..)
+  -- , UserDefaults (..)
+  -- , WGConfig (..)
+  -- , Key
+  -- , Address
+  -- , Port
+  -- , EndPoint
+  -- , Name
+  -- , PresharedKey
+  -- , CmdString
+  -- , KeepAlive
+  -- , Peers
+  -- , Table
+  -- , CIDR(..)
+  -- , Cidr
+  -- , readConfigFile
+  -- , writeConfigFile
+  -- , initConfig
+  -- , addUserToConfig
+  -- , addPeerAdjacent
+  -- , getAvailableAddress
+  -- , addIP
+  -- , ipToOctet
+  -- , ipToInt
+  -- , intToOctet
+  -- , ipFromInt
+  -- , delUserFromConfig
+  -- , getUserInfo
+  -- , userInConfig
+  -- ) where
+where
 
 
 import Control.Exception
@@ -52,11 +56,10 @@ import Data.Text.Lazy as T
 import qualified Data.Text as DT
 import Data.Maybe
 import qualified Data.Set as S
+import Control.Lens
 
 
-newtype WGConfig = WGConfig [User] deriving (Generic, Show)
-instance ToJSON WGConfig
-instance FromJSON WGConfig
+
 
 type Key = String
 type Address = String
@@ -94,24 +97,47 @@ instance FromJSON IPv4 where
 instance FromJSON (AddrRange IPv4) where
   parseJSON = withText "range" (\x -> return (read . DT.unpack $ x))
 
+data UserDefaults = UserDefaults
+  { _dPresharedKey :: PresharedKey
+  , _dPostUp :: CmdString
+  , _dPostDown :: CmdString
+  , _dPreUp :: CmdString
+  , _dPreDown :: CmdString
+  , _dPeers :: Peers
+  , _dTable ::Table
+  , _dKeepAlive :: KeepAlive
+  } deriving (Show, Generic)
+instance ToJSON UserDefaults
+instance FromJSON UserDefaults
+makeLenses ''UserDefaults
+
 data User = User
-  { name :: String
-  , privateKey :: Key
-  , publicKey :: Key
-  , presharedKey :: PresharedKey
-  , availableAddresses :: [CIDR]
-  , port :: Port
-  , endPoint :: EndPoint
-  , preUp :: CmdString
-  , preDown :: CmdString
-  , postUp :: CmdString
-  , postDown :: CmdString
-  , keepAlive :: KeepAlive
-  , peers :: Peers
-  , table :: Table
+  { _name :: String
+  , _privateKey :: Key
+  , _publicKey :: Key
+  , _presharedKey :: PresharedKey
+  , _availableAddresses :: [CIDR]
+  , _port :: Port
+  , _endPoint :: EndPoint
+  , _preUp :: CmdString
+  , _preDown :: CmdString
+  , _postUp :: CmdString
+  , _postDown :: CmdString
+  , _keepAlive :: KeepAlive
+  , _peers :: Peers
+  , _table :: Table
   } deriving (Show, Generic)
 instance ToJSON User
 instance FromJSON User
+makeLenses ''User
+
+data WGConfig = WGConfig { _defaults :: UserDefaults,  _users :: [User] } deriving (Generic, Show)
+instance ToJSON WGConfig
+instance FromJSON WGConfig
+makeLenses ''WGConfig
+
+initialDefaults :: UserDefaults
+initialDefaults = UserDefaults {_dPresharedKey=Nothing, _dPostUp=Nothing, _dPostDown=Nothing, _dPreUp=Nothing, _dPreDown=Nothing, _dPeers=Nothing, _dTable=Nothing, _dKeepAlive=Nothing}
 
 writeConfigFile :: FilePath -> WGConfig -> IO ()
 writeConfigFile configPath config = BS.writeFile configPath (Yaml.encode config)
@@ -125,7 +151,7 @@ readConfigFile path = do
   case mbBs of
     Nothing -> return $ Left "YAML file is corrupt"
     Just bs ->
-      if bs == "" then return $ Right $ WGConfig [] else
+      if bs == "" then return $ Right $ WGConfig initialDefaults [] else
       case Yaml.decodeEither' bs of
         Left e -> return $ Left $ Yaml.prettyPrintParseException e
         Right config -> return $ Right config
@@ -144,46 +170,46 @@ initConfig config = do
   - 
 -}
 addUserToConfig :: WGConfig -> User -> Either String WGConfig
-addUserToConfig (WGConfig users) user
-  | userInConfig (WGConfig users) (name user) = Left "User already in config"
-  | addressInConfig (WGConfig users) address = Left $ "Address " ++ show address ++ " Taken"
-  | otherwise = Right $ WGConfig (user:addPeerAdjacent users user)
+addUserToConfig (WGConfig defaults users) user
+  | userInConfig (WGConfig defaults users) (_name user) = Left "User already in config"
+  | addressInConfig (WGConfig defaults users) address = Left $ "Address " ++ show address ++ " Taken"
+  | otherwise = Right $ WGConfig defaults (user:addPeerAdjacent users user)
   where
-    address = caddr $ L.head $ availableAddresses user
+    address = caddr $ L.head $ _availableAddresses user
 
 addPeerAdjacent :: [User] -> User -> [User]
 -- addPeerAdjacent users user | trace ("config " ++ show users ++ "\n\n user: " ++ show user ++ "\n") False = undefined
 addPeerAdjacent users user =
-  case peers user of
+  case _peers user of
     Just npeers -> L.map (`listAppendPeers` npeers) users
       where
         -- listAppendPeers u ps | trace ("User: " ++ show u ++ "\n\n Peers: " ++ show ps ++ "\n") False = undefined
         listAppendPeers u [] = u
-        listAppendPeers u (p:ps) = if p == name u
-          then listAppendPeers u{peers = Just unionpeers} ps
+        listAppendPeers u (p:ps) = if p == _name u
+          then listAppendPeers u{_peers = Just unionpeers} ps
           else listAppendPeers u ps
             where
-              unionpeers = S.toList . S.fromList $ name user : fromMaybe [] (peers u)
+              unionpeers = S.toList . S.fromList $ _name user : fromMaybe [] (_peers u)
     Nothing -> users
 
 userInConfig :: WGConfig -> Name -> Bool
-userInConfig (WGConfig []) _ = False
-userInConfig (WGConfig users) username =
-  L.any (\u -> name u == username) users
+userInConfig (WGConfig defaults []) _ = False
+userInConfig (WGConfig defaults users) username =
+  L.any (\u -> _name u == username) users
 
 addressInConfig :: WGConfig -> IPv4 -> Bool
-addressInConfig (WGConfig users) address =
-  L.any (\u -> caddr (L.head (availableAddresses u)) == address) users
+addressInConfig (WGConfig defaults users) address =
+  L.any (\u -> caddr (L.head (_availableAddresses u)) == address) users
 
 
 getAvailableAddress :: WGConfig -> String
-getAvailableAddress (WGConfig []) =
+getAvailableAddress (WGConfig defaults []) =
   error "User must supply first IP"
-getAvailableAddress (WGConfig users) =
+getAvailableAddress (WGConfig defaults users) =
   maybe "" show (addIP (L.maximum addresses) 1)
   where
     addresses = [address user | user <- users]
-    address = caddr . L.head . availableAddresses
+    address = caddr . L.head . _availableAddresses
 
 ipToOctet :: IPv4 -> [Int]
 ipToOctet = fromIPv4
@@ -207,15 +233,15 @@ addIP ip n =
   Just (ipFromInt $ ipToInt ip + n)
 
 delUserFromConfig :: WGConfig -> Name -> Either String WGConfig
-delUserFromConfig config name =
-  if userInConfig config name then
-    Right $ removeUser config name
+delUserFromConfig config _name =
+  if userInConfig config _name then
+    Right $ removeUser config _name
   else
     Left "User not found"
 
 removeUser :: WGConfig -> Name -> WGConfig
-removeUser (WGConfig users) username =
-  WGConfig [user | user <- users, name user /= username]
+removeUser (WGConfig defaults users) username =
+  WGConfig defaults [user | user <- users, _name user /= username]
 
 getUserInfo :: WGConfig -> Name -> Either String String
 getUserInfo config name =
@@ -227,7 +253,7 @@ getUserInfo config name =
       user = lookupUser config name
 
 lookupUser :: WGConfig -> Name -> User
-lookupUser (WGConfig (user:users)) username =
-  if name user == username
+lookupUser (WGConfig defaults (user:users)) username =
+  if _name user == username
     then user
-    else lookupUser (WGConfig users) username
+    else lookupUser (WGConfig defaults users) username

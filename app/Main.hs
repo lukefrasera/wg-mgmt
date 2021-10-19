@@ -1,5 +1,6 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Main where
 
 import Options.Applicative
@@ -15,6 +16,7 @@ import Text.Read
 import Data.IP
 import qualified Data.List as L
 import Data.Maybe
+import Control.Lens ((^.))
 
 data Command =
     Init
@@ -61,7 +63,7 @@ userParser = CmdUser
   <*> optional tableParser
 
 tableParser :: Parser Table
-tableParser = 
+tableParser =
   Just <$> tableparse
   <|> flag' Nothing (long "no-table")
   where
@@ -167,7 +169,7 @@ toAddress s =
     validOctet = mapM inOctetRange octet
     octet = map readMaybe $ split "." s :: [Maybe Int]
     liftMbList [] = []
-    liftMbList (x:xs) = 
+    liftMbList (x:xs) =
       case x of
         Just value -> value:liftMbList xs
         Nothing -> liftMbList xs
@@ -268,7 +270,7 @@ main = do
       eiConfig <- run config command
       case eiConfig of
         Left str -> putStrLn $ "Error: " ++ str
-        Right (WGConfig []) -> putStrLn "Nothing to write."
+        Right (WGConfig defaults []) -> putStrLn "Nothing to write."
         Right modConfig -> writeConfigFile expandedDataPath modConfig
       return ()
 
@@ -291,7 +293,7 @@ generateUser cUser config = do
         (_, Just hout, _,_) <- createProcess(proc "wg" ["genpsk"]){std_in = CreatePipe, std_out = CreatePipe}
         Just . strip <$> hGetContents hout
       Just preshared -> return preshared
-      Nothing -> return Nothing
+      Nothing -> return $ config^.defaults.dPresharedKey
   -- think about thid mechanism
   address <-
     case caddress cUser of
@@ -317,33 +319,31 @@ generateUser cUser config = do
   -- user only if specified
   preUp <-
     case cpreUp cUser of
-      Nothing -> return Nothing
+      Nothing -> return $ config^.defaults.dPreUp
       Just cmd -> return cmd
   preDown <-
     case cpreDown cUser of
-      Nothing -> return Nothing
+      Nothing -> return $ config^.defaults.dPreDown
       Just cmd -> return cmd
   postUp <-
     case cpostUp cUser of
-      Nothing -> return $ Just $
-        [ "ip -4 route del 10.20.0.0/16 dev %i"
-        , "ip -4 route add 10.20.0.0/16 dev %i metric 601"]
+      Nothing -> return $ config^.defaults.dPostUp
       Just cmd -> return cmd
   postDown <-
     case cpostUp cUser of
-      Nothing -> return Nothing
+      Nothing -> return $ config^.defaults.dPostDown
       Just cmd -> return cmd
   keepAlive <-
     case ckeepAlive cUser of
-      Nothing -> return $ Just 25
+      Nothing -> return $ config^.defaults.dKeepAlive
       Just k -> return k
   peers <-
       case cpeers cUser of
-        Nothing -> return Nothing
+        Nothing -> return $ config^.defaults.dPeers
         Just p -> return p
   table <-
       case ctable cUser of
-        Nothing -> return Nothing
+        Nothing -> return $ config^.defaults.dTable
         Just p -> return p
   return (User name privateKey publicKey presharedKey address port endPoint preUp preDown postUp postDown keepAlive peers table)
 
@@ -353,7 +353,7 @@ updateUserInConfig config user =
     then Right $ updatePeers (updateUser config user) $ fromCmdUser user
     else Left "User not in config"
     where
-      updatePeers (WGConfig ps) u= WGConfig $ addPeerAdjacent ps u
+      updatePeers (WGConfig defaults ps) u= WGConfig defaults $ addPeerAdjacent ps u
 
 fromCmdUser :: CmdUser -> User
 fromCmdUser (CmdUser name privatekey publickey presharedkey availableAddresses port endPoint preup predown postup postdown keepalive peers table) = User
@@ -371,38 +371,38 @@ fromCmdUser (CmdUser name privatekey publickey presharedkey availableAddresses p
   (fromMaybe Nothing keepalive)
   (fromMaybe Nothing peers)
   (fromMaybe Nothing table)
-  
+
 updateUser :: WGConfig -> CmdUser -> WGConfig
-updateuser (WGConfig []) newuser = WGConfig []
-updateUser (WGConfig (user:users)) newuser =
-  if name user == cname newuser
-    then WGConfig $ mergeUsers user newuser:updatedUsers
-    else WGConfig $ user:updatedUsers
+updateuser (WGConfig defaults []) newuser = WGConfig defaults []
+updateUser (WGConfig defaults (user:users)) newuser =
+  if _name user == cname newuser
+    then WGConfig defaults $ mergeUsers user newuser:updatedUsers
+    else WGConfig defaults $ user:updatedUsers
     where
       updatedUsers =
-        case updateUser (WGConfig users) newuser of
-          (WGConfig users) -> users
-updateUser (WGConfig users) newuser =
+        case updateUser (WGConfig defaults users) newuser of
+          (WGConfig defaults users) -> users
+updateUser (WGConfig defaults users) newuser =
   case users of
-    [] -> WGConfig []
-    users -> WGConfig users
+    [] -> WGConfig defaults []
+    users -> WGConfig defaults users
 
 mergeUsers :: User -> CmdUser -> User
 mergeUsers ouser nuser = User
-  (name ouser)
-  (updateField (cprivateKey nuser) (privateKey ouser))
-  (updateField (cpublicKey nuser) (publicKey ouser))
-  (updateField (cpresharedKey nuser) (presharedKey ouser))
-  (updateField (catMaybes <$> caddress nuser) (availableAddresses ouser))
-  (updateField (cport nuser) (port ouser))
-  (updateField (cendpoint nuser) (endPoint ouser))
-  (updatePeers (cpreUp nuser) (preUp ouser))
-  (updatePeers (cpreDown nuser) (preDown ouser))
-  (updatePeers (cpostUp nuser) (postUp ouser))
-  (updatePeers (cpostDown nuser) (postDown ouser))
-  (updateField (ckeepAlive nuser) (keepAlive ouser))
-  (updatePeers (cpeers nuser) (peers ouser))
-  (updateField (ctable nuser) (table ouser))
+  (_name ouser)
+  (updateField (cprivateKey nuser) (_privateKey ouser))
+  (updateField (cpublicKey nuser) (_publicKey ouser))
+  (updateField (cpresharedKey nuser) (_presharedKey ouser))
+  (updateField (catMaybes <$> caddress nuser) (_availableAddresses ouser))
+  (updateField (cport nuser) (_port ouser))
+  (updateField (cendpoint nuser) (_endPoint ouser))
+  (updatePeers (cpreUp nuser) (_preUp ouser))
+  (updatePeers (cpreDown nuser) (_preDown ouser))
+  (updatePeers (cpostUp nuser) (_postUp ouser))
+  (updatePeers (cpostDown nuser) (_postDown ouser))
+  (updateField (ckeepAlive nuser) (_keepAlive ouser))
+  (updatePeers (cpeers nuser) (_peers ouser))
+  (updateField (ctable nuser) (_table ouser))
   where
     toCIDR ((a, r):xs) = (read a, read r):toCIDR xs
     toCIDR [] = []
@@ -416,9 +416,9 @@ mergeUsers ouser nuser = User
     updatePeers Nothing value = value
 
 getUser :: WGConfig -> Name -> User
-getUser (WGConfig (user:users)) username = 
-  if name user == username then user
-  else getUser (WGConfig users) username
+getUser (WGConfig defaults (user:users)) username =
+  if _name user == username then user
+  else getUser (WGConfig defaults users) username
 
 genConfStr :: WGConfig -> Name -> Either String String
 genConfStr config username =
@@ -427,22 +427,15 @@ genConfStr config username =
     else Left "User not in file."
     where
       confstr = createStr $ getUser config username
-      showCIDR (CIDR{caddr, crange}) = (show caddr ++ "/" ++ (show . snd . addrRangePair) crange)
+      showCIDR CIDR{caddr, crange} = show caddr ++ "/" ++ (show . snd . addrRangePair) crange
       createStr (User name prvkey pubkey pshkey addr port ep preup predown postup postdown keepalive peers table) =
-        join "\n" [ x | Just x <-
-          [ Just $ "# === [" ++ name  ++ "] === #"
-          , Just "[Interface]"
-          , Just $ "Address = " ++ (join "," $ map showCIDR addr)
-          , Just $ "PrivateKey = " ++ prvkey
-          , "ListenPort = " `combine` port
-          , "Table = " `combine` table
-          , cmdSection "PreUp = " preup
-          , cmdSection "PostUp = " postup
-          , cmdSection "PreDown = " predown
-          , cmdSection "PostDown = " postdown
-          , Just ""
-          , peersSection peers
-          ]]
+        join "\n" (catMaybes
+         [Just $ "# === [" ++ name ++ "] === #", Just "[Interface]",
+          Just $ "Address = " ++ join "," (map showCIDR addr),
+          Just $ "PrivateKey = " ++ prvkey, "ListenPort = " `combine` port,
+          "Table = " `combine` table, cmdSection "PreUp = " preup,
+          cmdSection "PostUp = " postup, cmdSection "PreDown = " predown,
+          cmdSection "PostDown = " postdown, Just "", peersSection peers])
       combine _ Nothing = Nothing
       combine str (Just value) = Just $ str ++ value
       peersSection Nothing = Nothing
@@ -455,16 +448,15 @@ cmdSection str (Just cmds) = Just $ join "\n" $ map (str ++) cmds
 
 createPeerSection :: User -> User -> String
 -- createPeerSection User{publicKey, presharedKey, address, endPoint, keepAlive} | trace ("createPeerSection " ++ show publicKey ++ " " ++ show presharedKey ++ " " ++ show address ++ " " ++ show endPoint ++ " " ++ show keepAlive) False = undefined
-createPeerSection User{presharedKey} User{name, publicKey, availableAddresses, endPoint, keepAlive} =
-  join "\n" [x | Just x <-
-    [ Just $ "# === [" ++ name ++ "] === #"
-    , Just "[Peer]"
-    , "PublicKey = " `combine` Just publicKey
-    , "PresharedKey = " `combine` presharedKey
-    , "AllowedIPs = " `combine` (Just $ join "," $ map showCIDR availableAddresses)
-    , "Endpoint = " `combine` endPoint
-    , "PersistentKeepalive = " `combine` (show <$> keepAlive)
-    ]]
+createPeerSection User{_presharedKey} User{_name, _publicKey, _availableAddresses, _endPoint, _keepAlive} =
+  join "\n" (catMaybes
+   [Just $ "# === [" ++ _name ++ "] === #", Just "[Peer]",
+    "PublicKey = " `combine` Just _publicKey,
+    "PresharedKey = " `combine` _presharedKey,
+    "AllowedIPs = "
+      `combine` Just (join "," $ map showCIDR _availableAddresses),
+    "Endpoint = " `combine` _endPoint,
+    "PersistentKeepalive = " `combine` (show <$> _keepAlive)])
   where
     combine _ Nothing = Nothing
     combine str (Just value) = Just $ str ++ value
@@ -495,4 +487,5 @@ run config (Get name)    =
 run config (Update cuser) = do
   print cuser
   return $ updateUserInConfig config cuser
+run config _ = return $ Left "Not implemented"
 -- run config (Make name)   = putStrLn "Make a self-installing script"
